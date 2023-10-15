@@ -107,13 +107,13 @@ pub enum StreamDeckEvent {
     DialRotate(u8, i8),
 
     /// Touch screen received short press
-    TouchScreenPress(u16, u16),
+    ScreenPress(u16, u16),
 
     /// Touch screen received long press
-    TouchScreenLongPress(u16, u16),
+    ScreenLongPress(u16, u16),
 
     /// Touch screen received a swipe
-    TouchScreenSwipe((u16, u16), (u16, u16)),
+    ScreenSwipe((u16, u16), (u16, u16)),
 }
 
 /// Interface for a Stream Deck device

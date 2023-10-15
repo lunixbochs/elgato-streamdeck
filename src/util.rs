@@ -91,14 +91,14 @@ pub fn read_lcd_input(data: &Vec<u8>) -> Result<StreamDeckEvent, StreamDeckError
     let start_y = u16::from_le_bytes([data[8], data[9]]);
 
     match &data[4] {
-        0x1 => Ok(StreamDeckEvent::TouchScreenPress(start_x, start_y)),
-        0x2 => Ok(StreamDeckEvent::TouchScreenLongPress(start_x, start_y)),
+        0x1 => Ok(StreamDeckEvent::ScreenPress(start_x, start_y)),
+        0x2 => Ok(StreamDeckEvent::ScreenLongPress(start_x, start_y)),
 
         0x3 => {
             let end_x = u16::from_le_bytes([data[10], data[11]]);
             let end_y = u16::from_le_bytes([data[12], data[13]]);
 
-            Ok(StreamDeckEvent::TouchScreenSwipe(
+            Ok(StreamDeckEvent::ScreenSwipe(
                 (start_x, start_y),
                 (end_x, end_y)
             ))
