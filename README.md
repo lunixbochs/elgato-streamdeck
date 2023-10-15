@@ -45,7 +45,7 @@ println!(
 device.set_brightness(35).unwrap();
 
 // Use image-rs to load an image
-let image = open("no-place-like-localhost.jpg").unwrap();
+let image = open("image.jpg").unwrap();
 
 // Write it to the device
 device.set_button_image(7, image).unwrap();
