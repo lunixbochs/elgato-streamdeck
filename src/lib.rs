@@ -29,14 +29,6 @@ pub mod util;
 /// Image processing functions
 pub mod images;
 
-/// Async Stream Deck
-#[cfg(feature = "async")]
-#[cfg_attr(docsrs, doc(cfg(feature = "async")))]
-pub mod asynchronous;
-#[cfg(feature = "async")]
-#[cfg_attr(docsrs, doc(cfg(feature = "async")))]
-pub use asynchronous::AsyncStreamDeck;
-
 /// Creates an instance of the HidApi
 ///
 /// Can be used if you don't want to link hidapi crate into your project
@@ -527,11 +519,6 @@ pub enum StreamDeckError {
     /// Failed to encode image
     ImageError(ImageError),
 
-    #[cfg(feature = "async")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
-    /// Tokio join error
-    JoinError(tokio::task::JoinError),
-
     /// There's literally nowhere to write the image
     NoScreen,
 
@@ -571,12 +558,5 @@ impl From<Utf8Error> for StreamDeckError {
 impl From<ImageError> for StreamDeckError {
     fn from(e: ImageError) -> Self {
         Self::ImageError(e)
-    }
-}
-
-#[cfg(feature = "async")]
-impl From<tokio::task::JoinError> for StreamDeckError {
-    fn from(e: tokio::task::JoinError) -> Self {
-        Self::JoinError(e)
     }
 }
