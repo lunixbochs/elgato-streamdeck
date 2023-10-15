@@ -442,47 +442,36 @@ impl StreamDeck {
         }
 
         let image_report_length = 1024;
-
         let image_report_header_length = 16;
-
         let image_report_payload_length = image_report_length - image_report_header_length;
 
-        let mut page_number = 0;
-        let mut bytes_remaining = rect.data.len();
+        let mut iter = rect.data
+            .chunks(image_report_payload_length)
+            .enumerate()
+            .peekable();
+        let mut buf = vec![0; image_report_length];
+        buf[0] = 0x02;
+        buf[1] = 0x0c;
 
-        while bytes_remaining > 0 {
-            let this_length = bytes_remaining.min(image_report_payload_length);
-            let bytes_sent = page_number * image_report_payload_length;
+        while let Some((i, chunk)) = iter.next() {
+            let is_last = iter.peek().is_none();
+            buf[2] = (x & 0xff) as u8;
+            buf[3] = (x >> 8) as u8;
+            buf[4] = (y & 0xff) as u8;
+            buf[5] = (y >> 8) as u8;
+            buf[6] = (rect.w & 0xff) as u8;
+            buf[7] = (rect.w >> 8) as u8;
+            buf[8] = (rect.h & 0xff) as u8;
+            buf[9] = (rect.h >> 8) as u8;
+            buf[10] = is_last as u8;
+            buf[11] = (i & 0xff) as u8;
+            buf[12] = (i >> 8) as u8;
+            buf[13] = (chunk.len() & 0xff) as u8;
+            buf[14] = (chunk.len() >> 8) as u8;
 
-            // Selecting header based on device
-            let mut buf: Vec<u8> = vec![
-                0x02,
-                0x0c,
-                (x & 0xff) as u8,
-                (x >> 8) as u8,
-                (y & 0xff) as u8,
-                (y >> 8) as u8,
-                (rect.w & 0xff) as u8,
-                (rect.w >> 8) as u8,
-                (rect.h & 0xff) as u8,
-                (rect.h >> 8) as u8,
-                if bytes_remaining <= image_report_payload_length { 1 } else { 0 },
-                (page_number & 0xff) as u8,
-                (page_number >> 8) as u8,
-                (this_length & 0xff) as u8,
-                (this_length >> 8) as u8,
-                0
-            ];
-
-            buf.extend(&rect.data[bytes_sent .. bytes_sent + this_length]);
-
-            // Adding padding
-            buf.extend(vec![0u8; image_report_length - buf.len()]);
-
+            buf[16..16 + chunk.len()].copy_from_slice(chunk);
+            buf[16 + chunk.len()..].fill(0);
             write_data(&self.device, &buf)?;
-
-            bytes_remaining -= this_length;
-            page_number += 1;
         }
 
         Ok(())
