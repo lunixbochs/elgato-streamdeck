@@ -79,11 +79,9 @@ impl ImageRect {
     pub fn from_image(image: DynamicImage) -> Result<ImageRect, StreamDeckError> {
         let (image_w, image_h) = image.dimensions();
 
-        let image_data = image.into_rgb8().to_vec();
-
         let mut buf = Vec::new();
-        let mut encoder = JpegEncoder::new_with_quality(&mut buf, 90);
-        encoder.encode(&image_data, image_w, image_h, ColorType::Rgb8)?;
+        let encoder = JpegEncoder::new_with_quality(&mut buf, 90);
+        image.write_with_encoder(encoder)?;
 
         Ok(ImageRect {
             w: image_w as u16,
