@@ -359,74 +359,39 @@ impl StreamDeck {
             _ => image_report_length - image_report_header_length
         };
 
-        let mut page_number = 0;
-        let mut bytes_remaining = image_data.len();
+        let mut iter = image_data
+            .chunks(image_report_payload_length)
+            .enumerate()
+            .peekable();
 
-        while bytes_remaining > 0 {
-            let this_length = bytes_remaining.min(image_report_payload_length);
-            let bytes_sent = page_number * image_report_payload_length;
+        let mut buf = vec![0; image_report_length];
+        while let Some((i, chunk)) = iter.next() {
+            let is_last = iter.peek().is_none();
+            let page = if self.kind == Kind::Original { i + 1 } else { i };
 
-            // Selecting header based on device
-            let mut buf: Vec<u8> = match self.kind {
-                Kind::Original => vec![
-                    0x02,
-                    0x01,
-                    (page_number + 1) as u8,
-                    0,
-                    if this_length == bytes_remaining { 1 } else { 0 },
-                    key + 1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                ],
-
-                Kind::Mini | Kind::MiniMk2 => vec![
-                    0x02,
-                    0x01,
-                    (page_number) as u8,
-                    0,
-                    if this_length == bytes_remaining { 1 } else { 0 },
-                    key + 1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                ],
-
-                _ => vec![
-                    0x02,
-                    0x07,
-                    key,
-                    if this_length == bytes_remaining { 1 } else { 0 },
-                    (this_length & 0xff) as u8,
-                    (this_length >> 8) as u8,
-                    (page_number & 0xff) as u8,
-                    (page_number >> 8) as u8,
-                ]
-            };
-
-            buf.extend(&image_data[bytes_sent .. bytes_sent + this_length]);
-
-            // Adding padding
-            buf.extend(vec![0u8; image_report_length - buf.len()]);
-
+            // Write header based on device
+            match self.kind {
+                Kind::Original | Kind::Mini | Kind::MiniMk2 => {
+                    buf[0] = 0x02;
+                    buf[1] = 0x01;
+                    buf[2] = page as u8;
+                    buf[4] = is_last as u8;
+                    buf[5] = key;
+                }
+                _ => {
+                    buf[0] = 0x02;
+                    buf[1] = 0x07;
+                    buf[2] = key;
+                    buf[3] = is_last as u8;
+                    buf[4] = (chunk.len() & 0xff) as u8;
+                    buf[5] = (chunk.len() >> 8) as u8;
+                    buf[6] = (page & 0xff) as u8;
+                    buf[7] = (page >> 8) as u8;
+                }
+            }
+            buf[image_report_header_length..image_report_header_length + chunk.len()].copy_from_slice(chunk);
+            buf[image_report_header_length + chunk.len()..].fill(0);
             write_data(&self.device, &buf)?;
-
-            bytes_remaining -= this_length;
-            page_number += 1;
         }
 
         Ok(())
