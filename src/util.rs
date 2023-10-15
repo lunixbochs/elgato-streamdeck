@@ -1,7 +1,8 @@
+use std::collections::HashSet;
 use std::str::{from_utf8, Utf8Error};
 use std::time::Duration;
 use hidapi::{HidDevice, HidError};
-use crate::{Kind, StreamDeckError, StreamDeckInput};
+use crate::{Kind, StreamDeckError, StreamDeckInput, StreamDeckEvent};
 
 /// Performs get_feature_report on [HidDevice]
 pub fn get_feature_report(device: &HidDevice, report_id: u8, length: usize) -> Result<Vec<u8>, HidError> {
@@ -85,19 +86,19 @@ pub fn read_button_states(kind: &Kind, states: &Vec<u8>) -> Vec<bool> {
 }
 
 /// Reads lcd screen input
-pub fn read_lcd_input(data: &Vec<u8>) -> Result<StreamDeckInput, StreamDeckError> {
+pub fn read_lcd_input(data: &Vec<u8>) -> Result<StreamDeckEvent, StreamDeckError> {
     let start_x = u16::from_le_bytes([data[6], data[7]]);
     let start_y = u16::from_le_bytes([data[8], data[9]]);
 
     match &data[4] {
-        0x1 => Ok(StreamDeckInput::TouchScreenPress(start_x, start_y)),
-        0x2 => Ok(StreamDeckInput::TouchScreenLongPress(start_x, start_y)),
+        0x1 => Ok(StreamDeckEvent::TouchScreenPress(start_x, start_y)),
+        0x2 => Ok(StreamDeckEvent::TouchScreenLongPress(start_x, start_y)),
 
         0x3 => {
             let end_x = u16::from_le_bytes([data[10], data[11]]);
             let end_y = u16::from_le_bytes([data[12], data[13]]);
 
-            Ok(StreamDeckInput::TouchScreenSwipe(
+            Ok(StreamDeckEvent::TouchScreenSwipe(
                 (start_x, start_y),
                 (end_x, end_y)
             ))
@@ -121,7 +122,36 @@ pub fn read_encoder_input(kind: &Kind, data: &Vec<u8>) -> Result<StreamDeckInput
                 .map(|s| i8::from_le_bytes([*s]))
                 .collect()
         )),
-
         _ => Err(StreamDeckError::BadData),
     }
+}
+
+/// Represents state changes for state_diff
+pub enum StateChange {
+    /// Rising edge at index
+    Add(u8),
+    /// Falling edge at index
+    Remove(u8),
+}
+
+/// Generate edge triggered events from a list of states
+pub fn state_diff(saved_states: &mut HashSet<u8>, new_states: &[bool]) -> Vec<StateChange> {
+    new_states
+        .iter()
+        .enumerate()
+        .filter_map(|(i, active)| {
+            let i = i as u8;
+            if *active != saved_states.contains(&i) {
+                if *active {
+                    saved_states.insert(i);
+                    Some(StateChange::Add(i))
+                } else {
+                    saved_states.remove(&i);
+                    Some(StateChange::Remove(i))
+                }
+            } else {
+                None
+            }
+        })
+        .collect()
 }

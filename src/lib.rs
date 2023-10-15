@@ -8,6 +8,7 @@
 #![warn(missing_docs)]
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::str::Utf8Error;
@@ -19,6 +20,7 @@ use crate::images::{convert_image, generate_blank_image, ImageRect};
 
 use crate::info::{ELGATO_VENDOR_ID, Kind};
 use crate::util::{extract_str, flip_key_index, get_feature_report, read_button_states, read_data, read_encoder_input, read_lcd_input, send_feature_report, write_data};
+use crate::util::{StateChange, state_diff};
 
 /// Various information about Stream Deck devices
 pub mod info;
@@ -73,12 +75,9 @@ pub fn list_devices(hidapi: &HidApi) -> Vec<(Kind, String)> {
         .collect()
 }
 
-/// Type of input that the device produced
+/// Type of input the device produced
 #[derive(Clone, Debug)]
 pub enum StreamDeckInput {
-    /// No data was passed from the device
-    NoData,
-
     /// Button was pressed
     ButtonStateChange(Vec<bool>),
 
@@ -87,6 +86,25 @@ pub enum StreamDeckInput {
 
     /// Encoder/Knob was twisted/turned
     EncoderTwist(Vec<i8>),
+}
+
+/// Stateful event interpreting a device event
+#[derive(Clone, Debug)]
+pub enum StreamDeckEvent {
+    /// Button was pressed
+    ButtonPress(u8),
+
+    /// Button was released
+    ButtonRelease(u8),
+
+    /// Dial was pressed
+    DialPress(u8),
+
+    /// Dial was released
+    DialRelease(u8),
+
+    /// Dial was rotated
+    DialRotate(u8, i8),
 
     /// Touch screen received short press
     TouchScreenPress(u16, u16),
@@ -98,17 +116,6 @@ pub enum StreamDeckInput {
     TouchScreenSwipe((u16, u16), (u16, u16)),
 }
 
-impl StreamDeckInput {
-    /// Checks if there's data received or not
-    pub fn is_empty(&self) -> bool {
-        if let StreamDeckInput::NoData = self {
-            true
-        } else {
-            false
-        }
-    }
-}
-
 /// Interface for a Stream Deck device
 pub struct StreamDeck {
     /// Kind of the device
@@ -116,7 +123,9 @@ pub struct StreamDeck {
     /// Connected HIDDevice
     device: HidDevice,
 
-    _blank_image: RefCell<Option<Vec<u8>>>,
+    pressed_buttons: HashSet<u8>,
+    pressed_dials:   HashSet<u8>,
+    blank_image: RefCell<Option<Vec<u8>>>,
 }
 
 /// Static functions of the struct
@@ -128,7 +137,9 @@ impl StreamDeck {
         Ok(StreamDeck {
             kind,
             device,
-            _blank_image: Default::default(),
+            pressed_buttons: HashSet::new(),
+            pressed_dials:   HashSet::new(),
+            blank_image: Default::default(),
         })
     }
 }
@@ -185,8 +196,8 @@ impl StreamDeck {
         }
     }
 
-    /// Reads all possible input from Stream Deck device
-    pub fn read_input(&self, timeout: Option<Duration>) -> Result<StreamDeckInput, StreamDeckError> {
+    /// Reads device events, empty vector if no data. Non-blocking if no timeout
+    pub fn read_events(&mut self, timeout: Option<Duration>) -> Result<Vec<StreamDeckEvent>, StreamDeckError> {
         match &self.kind {
             Kind::Plus => {
                 let data = read_data(
@@ -194,23 +205,46 @@ impl StreamDeck {
                     14.max(5 + self.kind.encoder_count() as usize),
                     timeout
                 )?;
-
-                if data[0] == 0 {
-                    return Ok(StreamDeckInput::NoData);
-                }
-
                 match &data[1] {
-                    0x0 => Ok(StreamDeckInput::ButtonStateChange(
-                        read_button_states(&self.kind, &data)
-                    )),
+                    0x0 => Ok({
+                        let states = read_button_states(&self.kind, &data);
+                        state_diff(&mut self.pressed_buttons, &states)
+                            .iter()
+                            .map(|e| match *e {
+                                StateChange::Add(i)    => StreamDeckEvent::ButtonPress(i),
+                                StateChange::Remove(i) => StreamDeckEvent::ButtonRelease(i),
+                            })
+                            .collect()
+                    }),
 
                     0x2 => Ok(
-                        read_lcd_input(&data)?
+                        vec![read_lcd_input(&data)?]
                     ),
 
-                    0x3 => Ok(
-                        read_encoder_input(&self.kind, &data)?
-                    ),
+                    0x3 => Ok(match read_encoder_input(&self.kind, &data)? {
+                        StreamDeckInput::EncoderStateChange(states) => {
+                            state_diff(&mut self.pressed_dials, &states)
+                                .iter()
+                                .map(|e| match *e {
+                                    StateChange::Add(i)    => StreamDeckEvent::DialPress(i),
+                                    StateChange::Remove(i) => StreamDeckEvent::DialRelease(i),
+                                })
+                                .collect()
+                        }
+                        StreamDeckInput::EncoderTwist(states) => {
+                            states
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(i, value)| {
+                                    if *value == 0 {
+                                        return None;
+                                    }
+                                    Some(StreamDeckEvent::DialRotate(i as u8, *value))
+                                })
+                                .collect()
+                        }
+                        _ => vec![],
+                    }),
 
                     _ => Err(StreamDeckError::BadData)
                 }
@@ -231,12 +265,18 @@ impl StreamDeck {
                 }?;
 
                 if data[0] == 0 {
-                    return Ok(StreamDeckInput::NoData);
+                    return Ok(vec![]);
                 }
 
-                Ok(StreamDeckInput::ButtonStateChange(
-                    read_button_states(&self.kind, &data)
-                ))
+                let states = read_button_states(&self.kind, &data);
+                let events = state_diff(&mut self.pressed_buttons, &states)
+                    .iter()
+                    .map(|e| match *e {
+                        StateChange::Add(i)    => StreamDeckEvent::ButtonPress(i),
+                        StateChange::Remove(i) => StreamDeckEvent::ButtonRelease(i),
+                    })
+                    .collect();
+                Ok(events)
             }
         }
     }
@@ -458,7 +498,7 @@ impl StreamDeck {
 
     /// Sets button's image to blank
     pub fn clear_button_image(&self, key: u8) -> Result<(), StreamDeckError> {
-         let mut image = self._blank_image.borrow_mut();
+         let mut image = self.blank_image.borrow_mut();
          if let Some(image) = &*image {
              return self.write_image(key, &image);
          }
