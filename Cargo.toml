@@ -11,7 +11,7 @@ license = "MPL-2.0"
 
 [dependencies]
 hidapi = { version = "2.4", default-features = false }
-image = { version = "0.24.6", default-features = false, features = ["bmp", "jpeg"] }
+image = { version = "0.24", default-features = false, features = ["bmp", "jpeg"] }
 tokio = { version = "1", optional = true }
 async-recursion = { version = "1.0.2", optional = true }
 
