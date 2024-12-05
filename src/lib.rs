@@ -376,7 +376,7 @@ impl StreamDeck {
                     buf[1] = 0x01;
                     buf[2] = page as u8;
                     buf[4] = is_last as u8;
-                    buf[5] = key;
+                    buf[5] = key + 1;
                 }
                 _ => {
                     buf[0] = 0x02;
